@@ -33,8 +33,9 @@ const initialItems: Item[] = [
   { id: 'item-2', content: 'Item 2' },
   { id: 'item-3', content: 'Item 3' },
   { id: 'section-1', content: 'Section 1', expanded: true, items: [{ id: 'item-5', content: 'Item 5' }, { id: 'item-6', content: 'Item 6' }] },
-  { id: 'section-2', content: 'Section 2', expanded: false, items: [{ id: 'item-8', content: 'Item 8' }, { id: 'item-9', content: 'Item 9' }] },
-  { id: 'item-7', content: 'Item 7' },
+  { id: 'section-2', content: 'Section 2', expanded: true, items: [{ id: 'item-7', content: 'Item 7' }, { id: 'item-8', content: 'Item 8' }] },
+  { id: 'section-3', content: 'Section 3', expanded: true, items: [{ id: 'item-9', content: 'Item 9' }, { id: 'item-10', content: 'Item 10' }] },
+  { id: 'item-11', content: 'Item 11' },
 ];
 
 type FieldComponentProps = {
@@ -202,9 +203,119 @@ const DnDSingleList: React.FC = () => {
       if (srcItem.expanded) return;
 
       const [movedItem] = newItems.splice(srcItem.localIndex!, 1);
+      // dst が section.items だった場合は，親 section を swap 対象とみなす
       const section = parentSection(dstItem);
       const dstLocalIndex = section ? section.localIndex! : dstItem.localIndex!;
       newItems.splice(dstLocalIndex, 0, movedItem);
+    } else {
+      const srcParent = parentSection(srcItem);
+
+      // section 間の移動について
+      //
+      // [リスト上部から下部への移動]
+      //
+      // section1
+      //   - field1 // ★
+      // section2
+      //     (1)
+      //   - field2
+      //     (2)
+      //   - field3
+      //     (3)
+      //
+      // (2) (3) は dst = field2, field3 になるため，dstParent = section2 となる．
+      // (1) は dst = section2 となり，dstParent = undefined となるため，そのまま dst を評価して移動対象である
+      // section2 を取得する．
+      //
+      // [リスト下部から上部への移動]
+      // 以下のような並びについて， field3 を (1) (2) (3) に動かすことを考える．
+      //
+      // section1
+      //     (1)
+      //   - field1
+      //     (2)
+      //   - field2
+      //     (3)
+      // section2
+      //   - field3 // ★
+      //
+      // (1) (2) は dst = field1, field2 になるため，dstParent = section1 となる．
+      // (3) は dst = section2 となり，dstParent = undefined となるため，ひとつ上の field2(sibling) を取り，
+      // その親(dstSiblingParent)を解決することで移動対象である section1 を取得する．
+      // なお，ひとつ上の section.items が空だった場合はそのまま sibling を section として評価する．
+      //
+      // また，上から下，下から上の移動で dst = Section になる場合に items の先頭/末尾に field を追加するため，
+      // 判定に必要な情報(toUp/toDown)を返却する
+      const resolveDstSection = (srcItem: Item, dstItem: Item): [Section|undefined, 'toUp'|'toDown'] => {
+        if (srcItem.index! < dstItem.index!) {
+          // 上部から下部への移動
+          const dstParent = parentSection(dstItem);
+          const self = isSection(dstItem) ? dstItem as Section : undefined;
+          return [ dstParent || self, 'toDown'];
+        } else {
+          // 下部から上部への移動
+          const dstParent = parentSection(dstItem);
+          const sibling = flatItems.find((entry) => entry.index === (dstItem.index! - 1))
+          const dstSiblingParent = sibling ? (isSection(sibling) ? sibling as Section : parentSection(sibling)) : undefined;
+          return [dstParent || dstSiblingParent, 'toUp'];
+        }
+      }
+      const [dstParent, direction] = resolveDstSection(srcItem, dstItem);
+
+      if (srcParent !== undefined) {
+        if (dstParent !== undefined && srcParent.index === dstParent.index) {
+          // 同じ section 内の移動
+          const section = newItems[srcParent.localIndex!] as Section;
+          const newSectionItems = Array.from(section.items);
+          const [removed] = newSectionItems.splice(srcItem.localIndex!, 1);
+          newSectionItems.splice(dstItem.localIndex!, 0, removed);
+          newItems[srcParent.localIndex!] = {...section, items: newSectionItems};
+        } else if (dstParent !== undefined) {
+          // 異なる section 間の移動
+          const srcSection = newItems[srcParent.localIndex!] as Section;
+          const dstSection = newItems[dstParent.localIndex!] as Section;
+
+          const newSrcItems = Array.from(srcSection.items);
+          const [removed] = newSrcItems.splice(srcItem.localIndex!, 1);
+          const newDstItems = Array.from(dstSection.items);
+          const dstLocalIndex = (dstItem: Item, newItems: Item[]) => {
+            if (direction === 'toUp') {
+              // 下から持ってきたときは，section がとれたら一番下につける
+              return isSection(dstItem) ? newItems.length : dstItem.localIndex!;
+            } else {
+              // 上から持ってきたときは，section がとれたら先頭にいれる
+              // また，上を抜いて持ってくるため， index が 1 ずれる(そのままの index を適用すると，
+              // 挿入しようとした位置の 1 つ下に配置される)のを補正する
+              return isSection(dstItem) ? 0 : dstItem.localIndex! + 1;
+            }
+          }
+          newDstItems.splice(dstLocalIndex(dstItem, newDstItems), 0, removed);
+
+          newItems[srcParent.localIndex!] = { ...srcSection, items: newSrcItems };
+          newItems[dstParent.localIndex!] = { ...dstSection, items: newDstItems };
+        } else {
+          // root への移動
+          const srcSection = newItems[srcParent.localIndex!] as Section;
+          const newSrcItems = Array.from(srcSection.items);
+          const [removed] = newSrcItems.splice(srcItem.localIndex!, 1);
+
+          newItems[srcParent.localIndex!] = { ...srcSection, items: newSrcItems };
+          newItems.splice(dstItem.localIndex!, 0, removed);
+        }
+      } else if (dstParent !== undefined) {
+        // root から section への移動
+        const dstSection = newItems[dstParent.localIndex!] as Section;
+        const newSectionItems = Array.from(dstSection.items);
+        const newDstPrent = newItems[dstParent.localIndex!] as Section;
+
+        const [removed] = newItems.splice(srcItem.localIndex!, 1);
+        newSectionItems.splice(dstItem.localIndex!, 0, removed);
+        newDstPrent.items = newSectionItems;
+      } else {
+        // root から root への移動
+        const [removed] = newItems.splice(srcItem.localIndex!, 1);
+        newItems.splice(dstItem.localIndex!, 0, removed);
+      }
     }
 
     setItems(newItems);
