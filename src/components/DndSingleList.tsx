@@ -1,9 +1,16 @@
-import React, {useRef, useState} from 'react';
-import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
+import React, {useEffect, useRef, useState} from 'react';
+import {DragDropContext, Droppable, Draggable, DropResult, DragUpdate, DragStart} from 'react-beautiful-dnd';
 
 type Field = {
   id: string;
   content: string;
+  // section 配下の場合の親 section の flatmap 上の index
+  parentIndex?: number;
+  // flatmap 上の index
+  // 実際には id で管理できるかもしれない
+  index?: number;
+  // 自分の所属する root/section 上の index
+  localIndex?: number;
 };
 
 type Section = {
@@ -11,9 +18,15 @@ type Section = {
   content: string;
   expanded: boolean;
   items: Field[];
+  // flatmap 上の index
+  index?: number;
+  // root 上の index
+  localIndex?: number;
 };
 
 type Item = Field | Section;
+
+const isSection = (item: Item) => 'items' in item;
 
 const initialItems: Item[] = [
   { id: 'item-1', content: 'Item 1' },
@@ -25,13 +38,16 @@ const initialItems: Item[] = [
 ];
 
 type FieldComponentProps = {
-  index: number;
   field: Field;
   parentSectionIndex?: number;
 }
 
 const FieldComponent = (props: FieldComponentProps) => {
-  const { index, field, parentSectionIndex } = props;
+  const { field, parentSectionIndex } = props;
+  const { index } = field;
+
+  if (index === undefined) throw new Error('Field index is required');
+
   return (
   <Draggable key={field.id} draggableId={field.id} index={index}>
     {(provided) => (
@@ -52,7 +68,7 @@ const FieldComponent = (props: FieldComponentProps) => {
         <div
           style={{
             userSelect: 'none',
-            padding: '16px',
+            padding: '4px',
             margin: '4px 0',
             border: '1px solid lightgrey',
             borderRadius: '4px',
@@ -68,14 +84,16 @@ const FieldComponent = (props: FieldComponentProps) => {
 }
 
 type SectionComponentProps = {
-  index: number;
   section: Section;
   toggleExpand: (id: string) => void;
 }
 
 const SectionComponent = (props: SectionComponentProps) => {
-  const {section, toggleExpand, index} = props;
-  const { expanded = true } = section;
+  const {section, toggleExpand } = props;
+  const { expanded = true, index } = section;
+
+  if (index === undefined) throw new Error('Section index is required');
+
   return (
     <Draggable
       key={section.id}
@@ -91,7 +109,7 @@ const SectionComponent = (props: SectionComponentProps) => {
           {...provided.dragHandleProps}
           style={{
             userSelect: 'none',
-            padding: '16px',
+            padding: '4px',
             margin: '4px 0',
             border: '1px solid lightgrey',
             borderRadius: '4px',
@@ -99,10 +117,29 @@ const SectionComponent = (props: SectionComponentProps) => {
             ...provided.draggableProps.style,
           }}
         >
-          <div onClick={() => toggleExpand(section.id)}>{section.content}</div>
+
+          <div onClick={() => toggleExpand(section.id)}>[{section.expanded ? '閉' : '開' }] {section.content}</div>
         </div>
       )}
     </Draggable>
+  )
+}
+
+const DebugList = (props : { items: Item[] }) => {
+  const { items } = props;
+
+  return (
+    <div>
+      {items.map((item, index) => {
+        const children = 'items' in item ? (item as Section).items.map((entry, idx) => <div key={idx}>-- {entry.id}</div>) : undefined;
+        return (
+          <>
+            <div key={index}>{item.id}</div>
+            {children}
+          </>
+        );
+      })}
+    </div>
   )
 }
 
@@ -116,10 +153,28 @@ const DnDSingleList: React.FC = () => {
     return index;
   }
 
+  const withIndex = (item: Item, index: number, localIndex: number, parentIndex?: number): Item => {
+    return { ...item, index, localIndex, parentIndex };
+  }
+  const itemsToFlatItems = (items: Item[]) => {
+    return items.flatMap((entry, index) => {
+      if ('items' in entry) {
+        const section = withIndex(entry, nextDndIndex(), index) as Section;
+        const children = section.items.map((entry, idx) => withIndex(entry, nextDndIndex(), idx, section.index));
+        return [section, ...children];
+      }
+      return [withIndex(entry, nextDndIndex(), index)];
+    })
+  }
+  const [flatItems, setFlatItems] = useState<Item[]>(itemsToFlatItems(items));
+  useEffect(() => {
+    setFlatItems(itemsToFlatItems(items))
+  }, [items])
+
   const toggleExpand = (id: string) => {
     setItems((prevItems) =>
       prevItems.map((item) =>
-        'items' in item && item.id === id
+        isSection(item) && item.id === id
           ? { ...item, expanded: !item.expanded }
           : item
       )
@@ -130,15 +185,26 @@ const DnDSingleList: React.FC = () => {
     if (!result.destination) return;
 
     const { source, destination } = result;
+    const srcItem = flatItems.find((entry) => entry.index === source.index);
+    const dstItem = flatItems.find((entry) => entry.index === destination.index);
+    if (srcItem === undefined || dstItem === undefined) throw new Error('dnd src and dst item are required');
 
     const newItems = Array.from(items);
-    const [movedItem] = newItems.splice(source.index, 1);
 
-    if ('items' in newItems[destination.index] && (newItems[destination.index] as Section).expanded) {
-      const section = newItems[destination.index] as Section;
-      section.items.push(movedItem as Field);
-    } else {
-      newItems.splice(destination.index, 0, movedItem);
+    const parentSection = (item: Item) => {
+      if (!isSection(item) && item.parentIndex !== undefined) {
+        return flatItems.find((entry) => entry.index === item.parentIndex) as Section;
+      }
+      return undefined;
+    }
+
+    if (isSection(srcItem)) {
+      if (srcItem.expanded) return;
+
+      const [movedItem] = newItems.splice(srcItem.localIndex!, 1);
+      const section = parentSection(dstItem);
+      const dstLocalIndex = section ? section.localIndex! : dstItem.localIndex!;
+      newItems.splice(dstLocalIndex, 0, movedItem);
     }
 
     setItems(newItems);
@@ -146,6 +212,7 @@ const DnDSingleList: React.FC = () => {
 
   return (
     <DragDropContext onDragEnd={onDragEnd}>
+      <DebugList items={items} />
       <Droppable droppableId="droppable">
         {(provided, snapshot) => (
           <div
@@ -158,19 +225,18 @@ const DnDSingleList: React.FC = () => {
               minHeight: 500,
             }}
           >
-            {items.flatMap((item) => {
+            {flatItems.map((item) => {
               if ('items' in item) {
-                const section = item as Section;
-                const sectionIndex = nextDndIndex();
-                const parent = <SectionComponent index={sectionIndex} section={item as Section} toggleExpand={toggleExpand}/>;
-                const children = section.items.map((field) => {
-                  return <FieldComponent key={field.id} index={nextDndIndex()} field={field} parentSectionIndex={sectionIndex} />;
-                } )
-                return [
-                  parent, ...(section.expanded && children || []),
-                ]
-              } else {
-                return [<FieldComponent index={nextDndIndex()} field={item as Field} />];
+                return <SectionComponent key={item.id} section={item} toggleExpand={toggleExpand}/>;
+             } else {
+                const field = item as Field;
+                if (field.parentIndex !== undefined) {
+                  const parent = flatItems.find((entry) => entry.index === field.parentIndex);
+                  if (parent === undefined) throw new Error('parent section is not found');
+                  return (parent as Section).expanded ?
+                    <FieldComponent key={field.id} field={field} parentSectionIndex={field.parentIndex} /> : undefined;
+                }
+                return <FieldComponent key={field.id} field={field} parentSectionIndex={field.parentIndex} />;
               }
             })}
             {provided.placeholder}
