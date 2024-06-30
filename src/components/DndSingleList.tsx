@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {DragDropContext, Droppable, Draggable, DropResult, DragUpdate, DragStart} from 'react-beautiful-dnd';
+import {Button} from "../components/Button";
 
 type Field = {
   id: string;
@@ -89,10 +90,12 @@ const FieldComponent = (props: FieldComponentProps) => {
 type SectionComponentProps = {
   section: Section;
   toggleExpand: (id: string) => void;
+  onClickDeleteSectionAndItems: (target: Section) => void;
+  onClickDeleteSection: (target: Section) => void;
 }
 
 const SectionComponent = (props: SectionComponentProps) => {
-  const {section, toggleExpand } = props;
+  const {section, toggleExpand, onClickDeleteSectionAndItems, onClickDeleteSection } = props;
   const { expanded = true, index } = section;
 
   if (index === undefined) throw new Error('Section index is required');
@@ -121,7 +124,11 @@ const SectionComponent = (props: SectionComponentProps) => {
           }}
         >
 
-          <div onClick={() => toggleExpand(section.id)}>[{expanded ? '閉' : '開' }] {section.content}</div>
+          <div>
+            <span style={{ color: 'red' }} onClick={() => toggleExpand(section.id)}>[{expanded ? '閉' : '開' }]</span>  {section.content}
+            <Button primary={false} backgroundColor="gray" size={4} label="削除(全部)" onClick={() => onClickDeleteSectionAndItems(section)} />
+            <Button primary={false} backgroundColor="gray" size={4} label="削除(item残す)" onClick={() => onClickDeleteSection(section)} />
+          </div>
         </div>
       )}
     </Draggable>
@@ -146,8 +153,14 @@ const DebugList = (props : { items: Item[] }) => {
   )
 }
 
-const DnDSingleList: React.FC = () => {
-  const [items, setItems] = useState(initialItems);
+type DnDSingleListProps = {
+  data: Item[];
+}
+
+const DnDSingleList = (props: DnDSingleListProps) => {
+  const { data } = props;
+
+  const [items, setItems] = useState(data.length === 0 ? initialItems : data);
 
   const dndIndex = useRef(0);
   const nextDndIndex = () => {
@@ -337,6 +350,23 @@ const DnDSingleList: React.FC = () => {
     setItems(newItems);
   };
 
+  const onClickDeleteSectionAndItems = (target: Section) => {
+    // eslint-disable-next-line no-restricted-globals
+    const result = confirm('aaa')
+    if (!result) return;
+    setItems((items) => {
+      return items.filter((item) => !(isSection(item) && item.id === target.id));
+    })
+  }
+
+  const onClickDeleteSection = (target: Section) => {
+    const itemsRemained= target.items;
+    setItems((items) => {
+      const filtered = items.filter((item) => !(isSection(item) && item.id === target.id));
+      return [...filtered, ...itemsRemained];
+    })
+  }
+
   return (
     <DragDropContext onDragEnd={onDragEnd}>
       <DebugList items={items} />
@@ -354,7 +384,7 @@ const DnDSingleList: React.FC = () => {
           >
             {flatItems.map((item) => {
               if ('items' in item) {
-                return <SectionComponent key={item.id} section={item} toggleExpand={toggleExpand}/>;
+                return <SectionComponent key={item.id} section={item} toggleExpand={toggleExpand} onClickDeleteSectionAndItems={onClickDeleteSectionAndItems} onClickDeleteSection={onClickDeleteSection} />;
              } else {
                 const field = item as Field;
                 if (field.parentIndex !== undefined) {
@@ -370,6 +400,8 @@ const DnDSingleList: React.FC = () => {
           </div>
         )}
       </Droppable>
+      <Button primary={true} backgroundColor="blue" size={30} label="Add Field" onClick={() => setItems((items) => [...items, { id: `dummy-${Math.floor(Math.random() * 1000)}`, content: 'aa' }])} />
+      <Button primary={true} backgroundColor="blue" size={10} label="Add Section" onClick={() => setItems((items) => [...items, { id: `dummy-section-${Math.floor(Math.random() * 1000)}`, content: 'aa', items: [] }])} />
     </DragDropContext>
   );
 };

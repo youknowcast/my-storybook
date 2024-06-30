@@ -5,6 +5,9 @@ import DnDSingleList from "../components/DndSingleList";
 const meta: Meta = {
   title: 'Example/DnDSingleList',
   component: DnDSingleList,
+  args: {
+    data: [],
+  }
 };
 
 type Story = StoryObj<typeof DnDSingleList>;
@@ -12,6 +15,6 @@ type Story = StoryObj<typeof DnDSingleList>;
 export const Basic: Story = {};
 
 export const WithProp: Story = {
-  render: () => <DnDSingleList />,
+  render: () => <DnDSingleList data={[]} />,
 };
 export default meta;

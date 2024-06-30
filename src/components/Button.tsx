@@ -5,7 +5,7 @@ type ButtonProps = {
   primary: boolean;
   backgroundColor: string;
   size: number;
-  label: 'small' | 'medium' | 'large';
+  label: string;
   onClick: () => void;
 };
 
