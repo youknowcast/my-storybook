@@ -28,6 +28,8 @@ type Item = Field | Section;
 
 const isSection = (item: Item) => 'items' in item;
 
+const isAdditional = (item: Item) => isSection(item) && item.expanded;
+
 const initialItems: Item[] = [
   { id: 'item-1', content: 'Item 1' },
   { id: 'item-2', content: 'Item 2' },
@@ -119,7 +121,7 @@ const SectionComponent = (props: SectionComponentProps) => {
           }}
         >
 
-          <div onClick={() => toggleExpand(section.id)}>[{section.expanded ? '閉' : '開' }] {section.content}</div>
+          <div onClick={() => toggleExpand(section.id)}>[{expanded ? '閉' : '開' }] {section.content}</div>
         </div>
       )}
     </Draggable>
@@ -161,7 +163,9 @@ const DnDSingleList: React.FC = () => {
     return items.flatMap((entry, index) => {
       if ('items' in entry) {
         const section = withIndex(entry, nextDndIndex(), index) as Section;
-        const children = section.items.map((entry, idx) => withIndex(entry, nextDndIndex(), idx, section.index));
+        // expanded でないときに flatItems と items のデータ量に齟齬が出てしまうが，
+        // react-beautiful-dnd の <Draggable /> はキーを連番で生成しないと動作がおかしくなるため，許容する．
+        const children = section.expanded ? section.items.map((entry, idx) => withIndex(entry, nextDndIndex(), idx, section.index)) : [];
         return [section, ...children];
       }
       return [withIndex(entry, nextDndIndex(), index)];
@@ -194,12 +198,14 @@ const DnDSingleList: React.FC = () => {
 
     const parentSection = (item: Item) => {
       if (!isSection(item) && item.parentIndex !== undefined) {
-        return flatItems.find((entry) => entry.index === item.parentIndex) as Section;
+        const section = flatItems.find((entry) => entry.index === item.parentIndex) as Section;
+        return isAdditional(section) ? section : undefined;
       }
       return undefined;
     }
 
     if (isSection(srcItem)) {
+      // section を移動する場合
       if (srcItem.expanded) return;
 
       const [movedItem] = newItems.splice(srcItem.localIndex!, 1);
@@ -208,9 +214,10 @@ const DnDSingleList: React.FC = () => {
       const dstLocalIndex = section ? section.localIndex! : dstItem.localIndex!;
       newItems.splice(dstLocalIndex, 0, movedItem);
     } else {
+      // Field を移動する場合
       const srcParent = parentSection(srcItem);
 
-      // section 間の移動について
+      // section が絡んだ移動について
       //
       // [リスト上部から下部への移動]
       //
@@ -244,23 +251,42 @@ const DnDSingleList: React.FC = () => {
       // その親(dstSiblingParent)を解決することで移動対象である section1 を取得する．
       // なお，ひとつ上の section.items が空だった場合はそのまま sibling を section として評価する．
       //
-      // また，上から下，下から上の移動で dst = Section になる場合に items の先頭/末尾に field を追加するため，
-      // 判定に必要な情報(toUp/toDown)を返却する
+      // また，上から下，下から上の移動で section が絡む場合，index の補正が必要になるため，
+      // 判定に必要な情報(toUp/toDown)を返却する．
+      //
+      // also see: dstSectionItemsLocalIndex
       const resolveDstSection = (srcItem: Item, dstItem: Item): [Section|undefined, 'toUp'|'toDown'] => {
         if (srcItem.index! < dstItem.index!) {
           // 上部から下部への移動
           const dstParent = parentSection(dstItem);
-          const self = isSection(dstItem) ? dstItem as Section : undefined;
+          const self = isAdditional(dstItem) ? dstItem as Section : undefined;
           return [ dstParent || self, 'toDown'];
         } else {
           // 下部から上部への移動
           const dstParent = parentSection(dstItem);
           const sibling = flatItems.find((entry) => entry.index === (dstItem.index! - 1))
-          const dstSiblingParent = sibling ? (isSection(sibling) ? sibling as Section : parentSection(sibling)) : undefined;
+          const dstSiblingParent = (() => {
+            if (!sibling) return undefined;
+            if (isAdditional(sibling)) return sibling as Section;
+            return parentSection(sibling);
+          })();
           return [dstParent || dstSiblingParent, 'toUp'];
         }
       }
       const [dstParent, direction] = resolveDstSection(srcItem, dstItem);
+
+      // section.items が関係する移動の際に localIndex を調整する
+      const dstSectionItemsLocalIndex = (dstItem: Item, newItems: Item[], direction: 'toUp' | 'toDown') => {
+        if (direction === 'toUp') {
+          // 下から持ってきたときに，section が dst だった場合は一番下につける
+          return isSection(dstItem) ? newItems.length : dstItem.localIndex!;
+        } else {
+          // 上から持ってきたときに，section が dst だった場合は先頭にいれる
+          // また，上を抜いて持ってくるため， index が 1 ずれる(そのままの index を適用すると，
+          // 挿入しようとした位置の 1 つ下に配置される)のを補正する
+          return isSection(dstItem) ? 0 : dstItem.localIndex! + 1;
+        }
+      }
 
       if (srcParent !== undefined) {
         if (dstParent !== undefined && srcParent.index === dstParent.index) {
@@ -278,18 +304,7 @@ const DnDSingleList: React.FC = () => {
           const newSrcItems = Array.from(srcSection.items);
           const [removed] = newSrcItems.splice(srcItem.localIndex!, 1);
           const newDstItems = Array.from(dstSection.items);
-          const dstLocalIndex = (dstItem: Item, newItems: Item[]) => {
-            if (direction === 'toUp') {
-              // 下から持ってきたときは，section がとれたら一番下につける
-              return isSection(dstItem) ? newItems.length : dstItem.localIndex!;
-            } else {
-              // 上から持ってきたときは，section がとれたら先頭にいれる
-              // また，上を抜いて持ってくるため， index が 1 ずれる(そのままの index を適用すると，
-              // 挿入しようとした位置の 1 つ下に配置される)のを補正する
-              return isSection(dstItem) ? 0 : dstItem.localIndex! + 1;
-            }
-          }
-          newDstItems.splice(dstLocalIndex(dstItem, newDstItems), 0, removed);
+          newDstItems.splice(dstSectionItemsLocalIndex(dstItem, newDstItems, direction), 0, removed);
 
           newItems[srcParent.localIndex!] = { ...srcSection, items: newSrcItems };
           newItems[dstParent.localIndex!] = { ...dstSection, items: newDstItems };
@@ -300,7 +315,9 @@ const DnDSingleList: React.FC = () => {
           const [removed] = newSrcItems.splice(srcItem.localIndex!, 1);
 
           newItems[srcParent.localIndex!] = { ...srcSection, items: newSrcItems };
-          newItems.splice(dstItem.localIndex!, 0, removed);
+          // section.items => root で上から下方向の移動の場合，index が 1 ずれるのを調整する
+          const dstLocalIndex = direction === 'toDown' ? dstItem.localIndex! + 1 : dstItem.localIndex!;
+          newItems.splice(dstLocalIndex, 0, removed);
         }
       } else if (dstParent !== undefined) {
         // root から section への移動
@@ -309,7 +326,7 @@ const DnDSingleList: React.FC = () => {
         const newDstPrent = newItems[dstParent.localIndex!] as Section;
 
         const [removed] = newItems.splice(srcItem.localIndex!, 1);
-        newSectionItems.splice(dstItem.localIndex!, 0, removed);
+        newSectionItems.splice(dstSectionItemsLocalIndex(dstItem, newSectionItems, direction), 0, removed);
         newDstPrent.items = newSectionItems;
       } else {
         // root から root への移動
@@ -317,7 +334,6 @@ const DnDSingleList: React.FC = () => {
         newItems.splice(dstItem.localIndex!, 0, removed);
       }
     }
-
     setItems(newItems);
   };
 
