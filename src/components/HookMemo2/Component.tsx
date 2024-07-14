@@ -1,4 +1,4 @@
-import {useMemo, useState} from "react";
+import {useCallback, useMemo, useState} from "react";
 import Button from './Button';
 import Counter from "./Counter";
 
@@ -11,8 +11,9 @@ const Component = () => {
   const [count1, setCount1] = useState(0);
   const [count2, setCount2] = useState(0);
 
-  const increment = () => setCount1((c) => c + 1);
-  const decrement = () => setCount2((c) => c - 1);
+  // Button や Counter で increment / decrement の参照変更により無駄に再レンダリングされるのを防ぐ
+  const increment = useCallback(() => setCount1((c) => c + 1), []);
+  const decrement = useCallback(() => setCount2((c) => c - 1), []);
 
   // btn1 と btn2 で，btn1 のみ heavyProcess 実行を伴うという前提をおきます．
   // useMemo しない場合，rendering 時に常に heavyProcess が実行されるため，
