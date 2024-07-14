@@ -1,8 +1,8 @@
-import HookTimer from "../components/HookTimer";
+import HookRef from "../components/HookRef";
 
 export default {
-  title: 'Example/HookTimer',
-  component: HookTimer,
+  title: 'Example/HookRef',
+  component: HookRef,
   // This component will have an automatically generated Autodocs entry: https://storybook.js.org/docs/writing-docs/autodocs
   tags: ['autodocs'],
   parameters: {
@@ -10,7 +10,6 @@ export default {
     layout: 'fullscreen',
   },
   args: {
-    init: 10,
   },
 };
 
