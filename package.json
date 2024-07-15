@@ -62,5 +62,10 @@
     "storybook": "^8.1.11",
     "typescript": "^5.5.2",
     "webpack": "^5.92.1"
+  },
+  "overrides": {
+    "react-scripts": {
+      "typescript": "^5"
+    }
   }
 }
