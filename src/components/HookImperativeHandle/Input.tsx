@@ -1,30 +1,34 @@
-import {forwardRef, useImperativeHandle, useRef} from "react";
+import { forwardRef, useImperativeHandle, useRef } from "react";
 
 type Props = {
-  label: string;
-}
+	label: string;
+};
 
 export interface InputProps {
-  focus: () => void;
+	focus: () => void;
 }
 
-const Input = forwardRef<InputProps, Props>((props :Props, ref) => {
-  const { label } = props;
-  const input = useRef<HTMLInputElement>(null);
+const Input = forwardRef<InputProps, Props>((props: Props, ref) => {
+	const { label } = props;
+	const input = useRef<HTMLInputElement>(null);
 
-  useImperativeHandle(ref, () => {
-    return {
-      focus() {
-        input.current?.focus();
-      }
-    }
-  }, [])
+	useImperativeHandle(
+		ref,
+		() => {
+			return {
+				focus() {
+					input.current?.focus();
+				},
+			};
+		},
+		[],
+	);
 
-  return (
-    <label>
-      {label}:
-      <input ref={input} type="text" size={15} />
-    </label>
-  )
-})
+	return (
+		<label>
+			{label}:
+			<input ref={input} type="text" size={15} />
+		</label>
+	);
+});
 export default Input;
